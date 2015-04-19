@@ -71,9 +71,6 @@ type Flog struct {
 	tag      string
 	mu   sync.Mutex
 	w io.WriteCloser
-	stamp string
-	now chan time.Time
-	ticker *time.Ticker
 }
 
 func New(priority Priority, tag string) *Flog {
@@ -105,32 +102,6 @@ func (w *Flog) SetTag(tag string) {
 func (w *Flog) SetPriority(priority, filter Priority) {
 	w.priority = priority
 	w.filter = filter
-}
-
-// 设置log记录的时间变化频率
-// 这个设置只有在你的log调用频率过高系统时间调用
-// 己变成瓶颈了才有意义。
-// （^_^~..表示不知道什么情况才会有如此大量的log)
-func (w *Flog) SetTick(precision time.Duration) {
-	if w.ticker != nil {
-		w.ticker.Stop()
-		w.ticker = nil
-	}
-
-	if (precision < 1) {
-		return
-	}
-
-	w.ticker = time.NewTicker(precision)
-
-	//己知bug：
-	//由于time.Ticker的chan无法闭所以这个go程永远不会停止
-	//所以这个SetTick设过N次就会有N-1个永远阻塞的go程！
-	go func() {
-		for now := range w.ticker.C {
-			w.stamp = now.Format(time.Stamp)
-		}
-	}()
 }
 
 func (w *Flog) Write(b []byte) (int, error) {
@@ -204,11 +175,9 @@ func (w *Flog) write(p Priority, msg string) (int, error) {
 		nl = "\n"
 	}
 
-	if w.ticker == nil {
-		w.stamp = time.Now().Format(time.Stamp)
-	}
+	t1 := time.Now().Format(time.Stamp)
 
-	_, err := fmt.Fprintf(w.w, "<%d>%s %s[%d]: %s%s", p, w.stamp, w.tag, os.Getpid(), msg, nl)
+	_, err := fmt.Fprintf(w.w, "<%d>%s %s[%d]: %s%s", p, t1, w.tag, os.Getpid(), msg, nl)
 	if err != nil {
 		return 0, err
 	}
