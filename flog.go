@@ -157,7 +157,7 @@ func (w *Flog) Debug(m string) (err error) {
 
 func (w *Flog) writeAndRetry(p Priority, s string) (int, error) {
 	tp := p & severityMask
-	if w.filter > tp {
+	if w.filter < tp {
 		return 0, nil
 	}
 
