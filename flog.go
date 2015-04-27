@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"log/syslog"
 )
 
 type Priority int
@@ -71,6 +72,10 @@ type Flog struct {
 	tag      string
 	mu   sync.Mutex
 	w io.WriteCloser
+}
+
+func Dial(network, raddr string, priority Priority, tag string) (*syslog.Writer, error) {
+	return syslog.Dial(network, raddr, syslog.Priority(priority), tag)
 }
 
 func New(priority Priority, tag string) *Flog {
