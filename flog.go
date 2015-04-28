@@ -5,9 +5,12 @@ import (
 	"os"
 	"io"
 	"strings"
+	"regexp"
 	"sync"
 	"time"
 	"log/syslog"
+	"net/url"
+	"errors"
 )
 
 type Priority int
@@ -72,31 +75,61 @@ type Flog struct {
 	tag      string
 	mu   sync.Mutex
 	w io.WriteCloser
+	noclose bool
+}
+
+func New(filename, priority, tag string) (Writer, error) {
+	_p := log_level(priority)
+	if _p == 0 {
+		return nil, errors.New("Priority Error")
+	}
+
+	switch filename {
+	case "" : fallthrough
+	case "<stderr>" :
+		l := new(Flog)
+		l.w = os.Stderr
+		l.priority = _p
+		l.filter = (_p & severityMask)
+		l.tag = tag
+		l.noclose = true
+		return l, nil
+	case "<syslog>" :
+		return Dial("", "", _p, tag)
+	default:
+		ok, _ := regexp.MatchString(`^\w\+`, filename)
+		if ok {
+			u, err := url.Parse(filename)
+			if err != nil {
+				return nil, err
+			}
+			return Dial(u.Scheme, u.Host, _p, tag)
+		} else {
+			return File(filename, _p, tag)
+		}
+	}
 }
 
 func Dial(network, raddr string, priority Priority, tag string) (*syslog.Writer, error) {
 	return syslog.Dial(network, raddr, syslog.Priority(priority), tag)
 }
 
-func New(priority Priority, tag string) *Flog {
-	return new(Flog).Init(os.Stderr, priority, (priority & severityMask), tag)
-}
-
-func NewFile(filename string, priority Priority, tag string) (w *Flog, err error) {
+func File(filename string, priority Priority, tag string) (w *Flog, err error) {
 	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_SYNC, 0666)
 	if err != nil {
 		return nil, err
 	}
 
-	w = new(Flog).Init(f, priority, (priority & severityMask), tag)
-	return w, nil
+	l := new(Flog)
+	l.w = f
+	l.priority = priority
+	l.filter = (priority & severityMask)
+	l.tag = tag
+	return l, nil
 }
 
-func (l *Flog) Init(w io.WriteCloser, priority, filter Priority, tag string) *Flog {
-	l.w = w
-	l.priority = priority
-	l.filter = filter
-	l.tag = tag
+func (l *Flog) Init(file string, w io.WriteCloser, priority, filter Priority, tag string) *Flog {
+
 	return l
 }
 
@@ -114,6 +147,10 @@ func (w *Flog) Write(b []byte) (int, error) {
 }
 
 func (w *Flog) Close() error {
+	if w.noclose {
+		return nil
+	}
+
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -190,5 +227,54 @@ func (w *Flog) write(p Priority, msg string) (int, error) {
 	return len(msg), nil
 }
 
+func log_level(level string) Priority {
+	level = strings.ToUpper(level)
+	sp := strings.SplitN(level, ":", 2)
+	if len(sp) < 2 {
+		sp = append(sp, "")
+		sp[0], sp[1] = sp[1], sp[0]
+	}
 
+	var out Priority
+
+	switch sp[0] {
+	case "KERN" : out = LOG_KERN
+	case "USER" : out = LOG_USER
+	case "MAIL" : out = LOG_MAIL
+	case "DAEMON" : out = LOG_DAEMON
+	case "AUTH" : out = LOG_AUTH
+	case "SYSLOG" : out = LOG_SYSLOG
+	case "LPR" : out = LOG_LPR
+	case "NEWS" : out = LOG_NEWS
+	case "UUCP" : out = LOG_UUCP
+	case "CRON" : out = LOG_CRON
+	case "AUTHPRIV" : out = LOG_AUTHPRIV
+	case "FTP" : out = LOG_FTP
+	case "" : fallthrough
+	case "LOCAL0" : out = LOG_LOCAL0
+	case "LOCAL1" : out = LOG_LOCAL1
+	case "LOCAL2" : out = LOG_LOCAL2
+	case "LOCAL3" : out = LOG_LOCAL3
+	case "LOCAL4" : out = LOG_LOCAL4
+	case "LOCAL5" : out = LOG_LOCAL5
+	case "LOCAL6" : out = LOG_LOCAL6
+	case "LOCAL7" : out = LOG_LOCAL7
+	default: return 0
+	}
+
+	switch sp[1] {
+	case "EMERG" : out |= LOG_EMERG
+	case "ALERT" : out |= LOG_ALERT
+	case "CRIT" : out |= LOG_CRIT
+	case "ERR" : out |= LOG_ERR
+	case "WARNING" : out |= LOG_WARNING
+	case "NOTICE" : out |= LOG_NOTICE
+	case "" : fallthrough
+	case "INFO" : out |= LOG_INFO
+	case "DEBUG" : out |= LOG_DEBUG
+	default: return 0
+	}
+
+	return out
+}
 
