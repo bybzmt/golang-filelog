@@ -94,6 +94,14 @@ func New(filename, priority, tag string) (Writer, error) {
 		l.tag = tag
 		l.noclose = true
 		return l, nil
+	case "<stdout>" :
+		l := new(Flog)
+		l.w = os.Stdout
+		l.priority = _p
+		l.filter = (_p & severityMask)
+		l.tag = tag
+		l.noclose = true
+		return l, nil
 	case "<syslog>" :
 		return Dial("", "", _p, tag)
 	default:
